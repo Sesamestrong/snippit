@@ -122,8 +122,8 @@ export const Landing = () => (
 			</LandingDescription>
 
 			<LandingActions>
-				<AugmentedLink href="#">Signin/up</AugmentedLink>
-				<AugmentedLink href="#">Browse snips</AugmentedLink>
+				<AugmentedLink to="/new">Create Snip</AugmentedLink>
+				<AugmentedLink to="/explore">Browse Snips</AugmentedLink>
 			</LandingActions>
 		</LandingContent>
 		<LandingIllustration></LandingIllustration>

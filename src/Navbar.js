@@ -59,7 +59,6 @@ const Link = ({ name, url }) => {
 	};
 
 	useEffect(() => {
-		console.log(matrixing, currentName !== name, currentName, name);
 		if (matrixing && currentName !== name) {
 			setTimeout(() => {
 				setCurrentName(

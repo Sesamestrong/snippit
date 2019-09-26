@@ -42,6 +42,7 @@ type Mutation{
   newSnip(name: String!, public:Boolean!): Snip @authenticated(isAuth:true)
   setUserRole(snipId:String!,username:String!,role:Role): UserRole @authenticated(isAuth:true)
   setSnipContent(snipId:String!,newContent:String!): String @authenticated(isAuth:true)
+  deleteSnip(snipId:String!) @authenticated(isAuth:true)
 }
 
 type User {
@@ -195,6 +196,13 @@ schema {
           _id
         })
       ),
+      deleteSnip: (async (_,{snipId},{_id})=>await role("OWNER")(async (snip)=>{
+          const owner=await User.findById(snip.ownerId);
+          owner.snipIds=owner.snipIds.filter(id=>id!==snipId);
+          await new Promise((resolve,reject)=>owner.save((err,owner)=>err||!owner?reject(err):resolve(owner)));
+          await (Snip.findById(snipId).remove().exec());
+      })(await Snip.findById(snipId),null,{_id})
+      )
     },
     //Add more resolvers here
     User: {
@@ -206,7 +214,7 @@ schema {
       users: (async (root) => (await Promise.all(root.roleIds.map(async roleId => await UserRole.findById(roleId))))),
     },
     UserRole: {
-      user: async (root) => 
+      user: async (root) =>
         await User.findById(root.userId)
       ,
     },

@@ -32,8 +32,6 @@ module.exports = new Promise(async (resolve, reject) => {
 directive @role(role:Role) on FIELD_DEFINITION
 directive @authenticated(isAuth:Boolean) on FIELD_DEFINITION
 directive @idToDoc(idName:String!,docType:Type!) on FIELD_DEFINITION
-directive @test1 on FIELD_DEFINITION
-directive @test2 on FIELD_DEFINITION
 
 type Query {
   me: User
@@ -83,10 +81,6 @@ enum Type {
   USER
   SNIP
   USER_ROLE
-}
-
-type Test {
-  name: String @test1 @test2
 }
 
 schema {
@@ -146,6 +140,8 @@ schema {
     USER_ROLE: UserRole,
   };
 
+  const idToDoc=(idName,model,doList)=>async (root)=>doList?await Promise.all(root[idName].map(async idName => await model.findById(idName))):await model.findById(root[idName]);
+
   class IdToDocDirective extends SchemaDirectiveVisitor {
     visitFieldDefinition(field) {
       const {
@@ -153,20 +149,20 @@ schema {
       } = field;
       const {
         idName,
-        docType
+        docType,
       } = this.args;
       const model = docTypeToModel[docType];
       //TODO clean this up
-      if (type instanceof GraphQLObjectType || (type instanceof GraphQLNonNull) && (type.ofType instanceof GraphQLObjectType))
-        field.resolve = async root => await model.findById(root[idName]);
-      else if (type instanceof GraphQLList || (type instanceof GraphQLNonNull) && (type.ofType instanceof GraphQLList))
-        field.resolve = async root => await Promise.all(root[idName].map(async idName => await model.findById(idName)))
-      else
-        throw "Invalid type; return type must be GraphQLNonNull (optional) wrapping either GraphQLObjectType or GraphQLList. Instead, got " + type.constructor.name + (type instanceof GraphQLNonNull ? "GraphQLNonNull holding " + type.ofType.constructor.name : "");
+
+      const isObj=(type,className=GraphQLObjectType)=>(type instanceof className?type:undefined) || ((type instanceof GraphQLNonNull) && (type.ofType instanceof className)?type.ofType:undefined);//Works for Type, Type! and returns Type
+      const isObjList=type=>((list=>list&&isObj(list.ofType))(isObj(type,GraphQLList)));//Works for [Type],![Type],[Type!],[Type!]! and returns Type
+      const isThisList=isObjList(type);
+      if(!(isObj(type)||isThisList))
+        throw "Invalid type; return type must be GraphQLNonNull (optional) wrapping either GraphQLObjectType or GraphQLList holding GraphQLObjectType.";
+      console.log(type+" isList? "+isThisList);
+      field.resolve=idToDoc(idName,model,isThisList);
     }
   }
-  //TODO Make a function version of this directive
-  //TODO Make the List type check if it elements are GraphQLObjectType
 
   const resolvers = {
     Query: {
@@ -296,8 +292,6 @@ schema {
       authenticated: AuthenticatedDirective,
       role: RoleDirective,
       idToDoc: IdToDocDirective,
-      test1,
-      test2
     },
   });
 

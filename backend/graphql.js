@@ -28,6 +28,7 @@ module.exports = new Promise(async (resolve, reject) => {
   const typeDefs = gql `
 directive @role(role:Role) on FIELD_DEFINITION
 directive @authenticated(isAuth:Boolean) on FIELD_DEFINITION
+directive @idToDoc(idName:String!,docType:Type!) on FIELD_DEFINITION
 
 type Query {
   me: User
@@ -71,6 +72,16 @@ type Snip {
 }
 input SnipQuery {
   name: String
+}
+
+enum Type {
+  USER
+  SNIP
+  USER_ROLE
+}
+
+type Test {
+  userLink:User! @idToDoc(idName:"userId",docType:USER)
 }
 
 schema {
@@ -121,6 +132,13 @@ schema {
         role: roleName
       } = this.args;
       field.resolve = role(roleName)((...args) => resolve.call(this, ...args));
+    }
+  }
+
+  class IdToDocDirective extends SchemaDirectiveVisitor {
+    visitFieldDefinition(field) {
+      const {type}=field;
+      console.log(type.constructor.name);
     }
   }
 
@@ -242,6 +260,7 @@ schema {
     schemaDirectives:{
       authenticated:AuthenticatedDirective,
       role:RoleDirective,
+      idToDoc:IdToDocDirective,
     },
   });
 

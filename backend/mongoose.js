@@ -151,7 +151,7 @@ module.exports = new Promise((resolve, reject) => {
     role
   }) {
     const roleNum = roleNames.indexOf(role);
-    return this.ownerId == _id || (await Promise.all(
+    return this.ownerId == _id || this.public && role==="READER" || (await Promise.all(
       this.roleIds.map(async roleId => (userRole => userRole.userId == _id && roleNum >= userRole.toNum())(await UserRole.findById(roleId))))).reduce((last, next) => last || next, false);
   };
   snips.methods.update = function(query) {

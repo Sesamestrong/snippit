@@ -102,6 +102,10 @@ module.exports = new Promise((resolve, reject) => {
       type: Boolean,
       required: true,
     },
+    tags: [{
+      type: String,
+      required: true,
+    }],
   });
 
   snips.statics.create = async function({
@@ -117,7 +121,8 @@ module.exports = new Promise((resolve, reject) => {
       public,
       content: "//Start Snip here",
       ownerId: _id,
-      roleIds: []
+      roleIds: [],
+      tags: [],
     });
     user.snipIds = [...user.snipIds, snip._id];
     return await new Promise((resolve, reject) => snip.save((err, snip) => err ? reject(err) : user.save((err, user) => err || !user ? reject(err) : resolve(snip))));
@@ -149,21 +154,27 @@ module.exports = new Promise((resolve, reject) => {
     return this.ownerId == _id || (await Promise.all(
       this.roleIds.map(async roleId => (userRole => userRole.userId == _id && roleNum >= userRole.toNum())(await UserRole.findById(roleId))))).reduce((last, next) => last || next, false);
   };
-  snips.methods.setContent = function({
-    newContent
-  }) {
-    this.content = newContent;
+  snips.methods.update = function(query) {
+    Object.keys(query).forEach(key => {
+      this[key] = query[key]
+    });
     return new Promise((resolve, reject) => this.save((err, snip) => err || !snip ? reject(err) : resolve(snip)));
   };
   snips.methods.setUserRole = async function({
     _id,
-    role
+    role,
   }) {
-    let existentRole = (await Promise.all(this.roleIds.map(async roleId => (role => role.userId+"" == _id && role)(await UserRole.findById(roleId)), undefined))).filter(i => i)[0];
-    if (existentRole)
+    let existentRole = (await Promise.all(this.roleIds.map(async roleId => (role => role.userId + "" == _id && role)(await UserRole.findById(roleId)), undefined))).filter(i => i)[0];
+    if (existentRole) {
+      if (!role) {
+        this.roleIds = this.roleIds.filter(roleId => roleId + "" !== _id);
+        return await Promise.all([
+          (UserRole.findByIdAndDelete(existentRole._id)),
+          (new Promise((resolve, reject) => this.save((err, snip) => err || !snip ? reject(err) : resolve(snip))))
+        ])&&undefined;
+      }
       existentRole.role = role;
-    else
-    {
+    } else {
       existentRole = new UserRole({
         userId: _id,
         role

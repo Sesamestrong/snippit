@@ -6,6 +6,9 @@ module.exports = new Promise(async (resolve, reject) => {
     SchemaDirectiveVisitor,
   } = require("apollo-server-express");
   const {
+    GraphQLObjectType,
+    GraphQLList,
+    GraphQLNonNull,
     defaultFieldResolver
   } = require("graphql");
   const jwt = require("jsonwebtoken");
@@ -25,6 +28,7 @@ module.exports = new Promise(async (resolve, reject) => {
     privateKey
   } = await require("./mongoose.js");
 
+  //TODO Fix bug that means that snips query doesn't show public snips to non-editors
   const typeDefs = gql `
 directive @role(role:Role) on FIELD_DEFINITION
 directive @authenticated(isAuth:Boolean) on FIELD_DEFINITION
@@ -42,13 +46,13 @@ type Mutation{
   newUser(username: String!, password: String!): String @authenticated(isAuth:false)
   newSnip(name: String!, public:Boolean!): Snip @authenticated(isAuth:true)
   setUserRole(snipId:String!,username:String!,role:Role): UserRole @authenticated(isAuth:true)
-  setSnipContent(snipId:String!,newContent:String!): String @authenticated(isAuth:true)
-  deleteSnip(snipId:String!) @authenticated(isAuth:true)
+  updateSnip(snipId:String!,query:SnipQuery!): Snip! @authenticated(isAuth:true)
+  deleteSnip(snipId:String!): String! @authenticated(isAuth:true)
 }
 
 type User {
   username: String!
-  snips: [Snip]!
+  snips: [Snip]! @idToDoc(idName:"snipIds",docType:SNIP)
 }
 
 enum Role {
@@ -58,7 +62,7 @@ enum Role {
 }
 
 type UserRole {
-  user:User!
+  user:User! @idToDoc(idName:"userId",docType:USER)
   role:Role
 }
 
@@ -66,22 +70,23 @@ type Snip {
   id: String!
   name: String! @role(role:READER)
   content: String! @role(role:READER)
-  owner: User! @role(role:READER)
+  owner: User! @idToDoc(idName:"ownerId",docType:USER) @role(role:READER)
   public: Boolean!
-  users:[UserRole!]! @role(role:READER)
+  users:[UserRole!]! @idToDoc(idName:"roleIds",docType:USER_ROLE) @role(role:READER)
+  tags:[String!]!
 }
+
 input SnipQuery {
   name: String
+  tags:[String!]
+  public:Boolean
+  content:String
 }
 
 enum Type {
   USER
   SNIP
   USER_ROLE
-}
-
-type Test {
-  userLink:User! @idToDoc(idName:"userId",docType:USER)
 }
 
 schema {
@@ -113,7 +118,7 @@ schema {
   }
 
   const role = role => next => async (root, args, context, info) => {
-    console.log("Looking for role", role);
+    //console.log("Looking for role", role);
     if (root.constructor.modelName !== "Snip") throw "Roles exist only for snips!";
     if (await root.userHasRole({
         role,
@@ -135,10 +140,35 @@ schema {
     }
   }
 
+  const docTypeToModel = {
+    USER: User,
+    SNIP: Snip,
+    USER_ROLE: UserRole,
+  };
+
+  const isObj = (type, className = GraphQLObjectType) => (type instanceof className ? type : undefined) || ((type instanceof GraphQLNonNull) && (type.ofType instanceof className) ? type.ofType : undefined); //Works for Type, Type! and returns Type
+  const isObjList = type => ((list => list && isObj(list.ofType))(isObj(type, GraphQLList))); //Works for [Type],![Type],[Type!],[Type!]! and returns Type
+
+  const idToDoc = (idName, model, doList) => async (root) => doList ? await Promise.all(root[idName].map(async idName => await model.findById(idName))) : await model.findById(root[idName]);
+
   class IdToDocDirective extends SchemaDirectiveVisitor {
     visitFieldDefinition(field) {
-      const {type}=field;
-      console.log(type.constructor.name);
+      const {
+        type
+      } = field;
+      const {
+        idName,
+        docType,
+      } = this.args;
+      const model = docTypeToModel[docType];
+
+      const isObj = (type, className = GraphQLObjectType) => (type instanceof className ? type : undefined) || ((type instanceof GraphQLNonNull) && (type.ofType instanceof className) ? type.ofType : undefined); //Works for Type, Type! and returns Type
+      const isObjList = type => ((list => list && isObj(list.ofType))(isObj(type, GraphQLList))); //Works for [Type],![Type],[Type!],[Type!]! and returns Type
+
+      const isThisList = isObjList(type);
+      if (!(isObj(type) || isThisList))
+        throw "Invalid type; return type must be GraphQLNonNull (optional) wrapping either GraphQLObjectType or GraphQLList holding GraphQLObjectType.";
+      field.resolve = idToDoc(idName, model, isThisList);
     }
   }
 
@@ -163,7 +193,24 @@ schema {
       snip: async (root, {
         id
       }) => await Snip.findById(id),
-      snips: async (root,{query:{name}},{_id}) => (await Promise.all((await Snip.find(graphqlToMongoose({name}))).map(snip=>snip.userHasRole({role:"READER",_id})?snip:null))).filter(i=>i),
+      snips: async (root, {
+        query: {
+          name,
+          public,
+          tags,
+          //Content search ignored, as use of it would be prohibitively expensive
+        }
+      }, {
+        _id
+      }) => (await Promise.all((await Snip.find(graphqlToMongoose({
+        name,
+        public,
+      }))).map(async snip => (await snip.userHasRole({
+        role: "READER",
+        _id
+      }))&&(//Include only the snips that have at least one of the tags specified
+        tags?tags.reduce((last,next)=>last||(snip.tags.includes(next)),false):true
+      ) ? snip : null))).filter(i => i),
     },
     Mutation: {
       newUser: (async (_, {
@@ -197,45 +244,46 @@ schema {
           _id: (await User.findOne({
             username
           }))._id,
-          role: roleName
+          role: roleName,
         }))(await Snip.findById(snipId), null, {
           _id
         })
       ),
-      setSnipContent: (async (_, {
+      updateSnip: (async (_, {
           snipId,
-          newContent
+          query,
         }, {
           _id
         }) =>
-        await role("OWNER")(async (snip) => (await snip.setContent({
-          newContent
-        })).content)(await Snip.findById(snipId), null, {
+        await role("EDITOR")(async (snip) => (await snip.update(graphqlToMongoose({
+          name:query.name,
+          content:query.content,
+          public:query.public,
+          tags:query.tags,
+        }))))(await Snip.findById(snipId), null, {
           _id
         })
       ),
-      deleteSnip: (async (_,{snipId},{_id})=>await role("OWNER")(async (snip)=>{
-          const owner=await User.findById(snip.ownerId);
-          owner.snipIds=owner.snipIds.filter(id=>id!==snipId);
-          await new Promise((resolve,reject)=>owner.save((err,owner)=>err||!owner?reject(err):resolve(owner)));
-          await (Snip.findById(snipId).remove().exec());
-      })(await Snip.findById(snipId),null,{_id})
-      )
+      deleteSnip: (async (_, {
+        snipId
+      }, {
+        _id
+      }) => await role("OWNER")(async (snip) => {
+        const owner = await User.findById(snip.ownerId);
+        const startLength=owner.snipIds.length;
+        owner.snipIds = owner.snipIds.filter(id => id+"" !== snipId);
+        console.log("Deleting: Starting length of owner snipIds vs. ending length: "+startLength+" vs. "+owner.snipIds.length);
+        await new Promise((resolve, reject) => owner.save((err, owner) => err || !owner ? reject(err) : resolve(owner)));
+        await (Snip.findByIdAndDelete(snipId));
+        return snipId;
+      })(await Snip.findById(snipId), null, {
+        _id
+      }))
     },
     //Add more resolvers here
-    User: {
-      snips: (root) => Promise.all(root.snipIds.map(async snipId => await Snip.findById(snipId))),
-    },
-    Snip: {
-      owner: (async (root) => await User.findById(root.ownerId)),
-      //TODO fix User.findById(... returning null or undefined
-      users: (async (root) => (await Promise.all(root.roleIds.map(async roleId => await UserRole.findById(roleId))))),
-    },
-    UserRole: {
-      user: async (root) =>
-        await User.findById(root.userId)
-      ,
-    },
+    User: {},
+    Snip: {},
+    UserRole: {},
   };
 
   const context = function({
@@ -257,10 +305,10 @@ schema {
     typeDefs,
     resolvers,
     context,
-    schemaDirectives:{
-      authenticated:AuthenticatedDirective,
-      role:RoleDirective,
-      idToDoc:IdToDocDirective,
+    schemaDirectives: {
+      authenticated: AuthenticatedDirective,
+      role: RoleDirective,
+      idToDoc: IdToDocDirective,
     },
   });
 

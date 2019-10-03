@@ -54,7 +54,7 @@
         "mocha": "^6.2.0",
         "sinon": "^7.4.1"
     },
-    "homepage": "https://sesamestrong.github.io/snippit",
+    "homepage": "https://snippit.ml/",
     "babel": {
         "presets": [
             "@babel/env",

@@ -5,13 +5,7 @@ module.exports = new Promise(async (resolve, reject) => {
     gql,
     SchemaDirectiveVisitor,
   } = require("apollo-server-express");
-  const {
-    GraphQLObjectType,
-    GraphQLList,
-    GraphQLNonNull,
-    defaultFieldResolver
-  } = require("graphql");
-  const jwt = require("jsonwebtoken");
+    const jwt = require("jsonwebtoken");
 
   const ObjectId = mongoose.Types.ObjectId;
   ObjectId.prototype.valueOf = function() {
@@ -27,6 +21,15 @@ module.exports = new Promise(async (resolve, reject) => {
     },
     privateKey
   } = await require("./mongoose.js");
+
+  const {
+    IdToDocDirective,
+    idToDoc,
+    AuthenticatedDirective,
+    authenticated,
+    RoleDirective,
+    role,
+  }=await require("./directives.js");
 
   //TODO Fix bug that means that snips query doesn't show public snips to non-editors
   const typeDefs = gql `
@@ -81,6 +84,7 @@ input SnipQuery {
   tags:[String!]
   public:Boolean
   content:String
+  owner:String
 }
 
 enum Type {
@@ -100,77 +104,6 @@ schema {
     [key]: query[key]
   }, {}));
 
-  const authenticated = (bool = true) => next => (root, args, context, info) => {
-    if ((!!(context._id)) == bool)
-      return next(root, args, context, info);
-    throw bool ? "Not authenticated." : "Already authenticated.";
-  };
-  class AuthenticatedDirective extends SchemaDirectiveVisitor {
-    visitFieldDefinition(field) {
-      const {
-        resolve = defaultFieldResolver
-      } = field;
-      const {
-        isAuth = true
-      } = this.args;
-      field.resolve = authenticated(isAuth)((...args) => resolve.call(this, ...args));
-    }
-  }
-
-  const role = role => next => async (root, args, context, info) => {
-    //console.log("Looking for role", role);
-    if (root.constructor.modelName !== "Snip") throw "Roles exist only for snips!";
-    if (await root.userHasRole({
-        role,
-        _id: context._id
-      }))
-      return await next(root, args, context, info);
-    throw `User does not have role ${role}.`;
-  };
-
-  class RoleDirective extends SchemaDirectiveVisitor {
-    visitFieldDefinition(field) {
-      const {
-        resolve = defaultFieldResolver
-      } = field;
-      const {
-        role: roleName
-      } = this.args;
-      field.resolve = role(roleName)((...args) => resolve.call(this, ...args));
-    }
-  }
-
-  const docTypeToModel = {
-    USER: User,
-    SNIP: Snip,
-    USER_ROLE: UserRole,
-  };
-
-  const isObj = (type, className = GraphQLObjectType) => (type instanceof className ? type : undefined) || ((type instanceof GraphQLNonNull) && (type.ofType instanceof className) ? type.ofType : undefined); //Works for Type, Type! and returns Type
-  const isObjList = type => ((list => list && isObj(list.ofType))(isObj(type, GraphQLList))); //Works for [Type],![Type],[Type!],[Type!]! and returns Type
-
-  const idToDoc = (idName, model, doList) => async (root) => doList ? await Promise.all(root[idName].map(async idName => await model.findById(idName))) : await model.findById(root[idName]);
-
-  class IdToDocDirective extends SchemaDirectiveVisitor {
-    visitFieldDefinition(field) {
-      const {
-        type
-      } = field;
-      const {
-        idName,
-        docType,
-      } = this.args;
-      const model = docTypeToModel[docType];
-
-      const isObj = (type, className = GraphQLObjectType) => (type instanceof className ? type : undefined) || ((type instanceof GraphQLNonNull) && (type.ofType instanceof className) ? type.ofType : undefined); //Works for Type, Type! and returns Type
-      const isObjList = type => ((list => list && isObj(list.ofType))(isObj(type, GraphQLList))); //Works for [Type],![Type],[Type!],[Type!]! and returns Type
-
-      const isThisList = isObjList(type);
-      if (!(isObj(type) || isThisList))
-        throw "Invalid type; return type must be GraphQLNonNull (optional) wrapping either GraphQLObjectType or GraphQLList holding GraphQLObjectType.";
-      field.resolve = idToDoc(idName, model, isThisList);
-    }
-  }
 
   const resolvers = {
     Query: {
@@ -198,19 +131,26 @@ schema {
           name,
           public,
           tags,
+          owner,
           //Content search ignored, as use of it would be prohibitively expensive
         }
       }, {
         _id
       }) => (await Promise.all((await Snip.find(graphqlToMongoose({
-        name,
         public,
       }))).map(async snip => (await snip.userHasRole({
         role: "READER",
         _id
       }))&&(//Include only the snips that have at least one of the tags specified
         tags?tags.reduce((last,next)=>last||(snip.tags.includes(next)),false):true
-      ) ? snip : null))).filter(i => i),
+      )
+        &&(//Assure that owner has the given username
+          owner?(await User.findById(snip.ownerId)).username===owner:true
+        )
+        &&(
+          name?snip.name.includes(name):true
+        )
+        ? snip : null))).filter(i => i),
     },
     Mutation: {
       newUser: (async (_, {
@@ -260,6 +200,7 @@ schema {
           content:query.content,
           public:query.public,
           tags:query.tags,
+          //owner excluded because we have setUserRole for that
         }))))(await Snip.findById(snipId), null, {
           _id
         })

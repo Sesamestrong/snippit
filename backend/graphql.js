@@ -5,8 +5,7 @@ module.exports = new Promise(async (resolve, reject) => {
     gql,
     SchemaDirectiveVisitor,
   } = require("apollo-server-express");
-  const {defaultFieldResolver}=require("graphql");
-  const jwt = require("jsonwebtoken");
+    const jwt = require("jsonwebtoken");
 
   const ObjectId = mongoose.Types.ObjectId;
   ObjectId.prototype.valueOf = function() {
@@ -23,28 +22,40 @@ module.exports = new Promise(async (resolve, reject) => {
     privateKey
   } = await require("./mongoose.js");
 
+  const {
+    IdToDocDirective,
+    idToDoc,
+    AuthenticatedDirective,
+    authenticated,
+    RoleDirective,
+    role,
+  }=await require("./directives.js");
+
+  //TODO Fix bug that means that snips query doesn't show public snips to non-editors
   const typeDefs = gql `
 directive @role(role:Role) on FIELD_DEFINITION
-directive @authenticated(iAuth:Boolean) on FIELD_DEFINITION
+directive @authenticated(isAuth:Boolean) on FIELD_DEFINITION
+directive @idToDoc(idName:String!,docType:Type!) on FIELD_DEFINITION
 
 type Query {
   me: User
   user(username: String!): User
   validate(username: String!, password: String!): String
   snip(id: String!): Snip
-  snips(query: SnipQuery): [Snip!]!
+  snips(query: SnipQuery!): [Snip]!
 }
 
 type Mutation{
-  newUser(username: String!, password: String!): String
-  newSnip(name: String!, public:Boolean!): Snip
-  setUserRole(snipId:String!,username:String!,role:Role): UserRole
-  setSnipContent(snipId:String!,newContent:String!): String
+  newUser(username: String!, password: String!): String @authenticated(isAuth:false)
+  newSnip(name: String!, public:Boolean!): Snip @authenticated(isAuth:true)
+  setUserRole(snipId:String!,username:String!,role:Role): UserRole @authenticated(isAuth:true)
+  updateSnip(snipId:String!,query:SnipQuery!): Snip! @authenticated(isAuth:true)
+  deleteSnip(snipId:String!): String! @authenticated(isAuth:true)
 }
 
 type User {
   username: String!
-  snips: [Snip]!
+  snips: [Snip]! @idToDoc(idName:"snipIds",docType:SNIP)
 }
 
 enum Role {
@@ -54,20 +65,32 @@ enum Role {
 }
 
 type UserRole {
-  user:User!
+  user:User! @idToDoc(idName:"userId",docType:USER)
   role:Role
 }
 
 type Snip {
   id: String!
-  name: String!
-  content: String!
-  owner: User!
+  name: String! @role(role:READER)
+  content: String! @role(role:READER)
+  owner: User! @idToDoc(idName:"ownerId",docType:USER) @role(role:READER)
   public: Boolean!
-  users:[UserRole!]!
+  users:[UserRole!]! @idToDoc(idName:"roleIds",docType:USER_ROLE) @role(role:READER)
+  tags:[String!]!
 }
+
 input SnipQuery {
   name: String
+  tags:[String!]
+  public:Boolean
+  content:String
+  owner:String
+}
+
+enum Type {
+  USER
+  SNIP
+  USER_ROLE
 }
 
 schema {
@@ -81,41 +104,10 @@ schema {
     [key]: query[key]
   }, {}));
 
-  const authenticated = (bool = true) => next => (root, args, context, info) => {
-    if ((!!(context._id)) == bool)
-      return next(root, args, context, info);
-    throw bool ? "Not authenticated." : "Already authenticated.";
-  };
-  class AuthenticatedDirective extends SchemaDirectiveVisitor {
-    visitFieldDirective(field){
-      const {resolve=defaultFieldResolver}=field;
-      const {isAuth=true}=this.args;
-      field.resolve=authenticated(isAuth)((...args)=>resolve.call(this,...args));
-    }
-  }
-
-  const role = role => next => async (root, args, context, info) => {
-    console.log("Looking for role", role);
-    if (root.constructor.modelName !== "Snip") throw "Roles exist only for snips!";
-    if (await root.userHasRole({
-        role,
-        _id: context._id
-      }))
-      return await next(root, args, context, info);
-    throw "User does not have role.";
-  };
-
-  class RoleDirective extends SchemaDirectiveVisitor {
-    visitFieldDirective(field) {
-      const {resolve=defaultFieldResolver}=field;
-      const {role:roleName}=this.args;
-      field.resolve=role(roleName)((...args)=>resolve.call(this,...args));
-    }
-  }
 
   const resolvers = {
     Query: {
-      me: authenticated()(async (_, args, {
+      me: (async (_, args, {
         _id
       }) => await User.findById(_id)),
       user: async (_, {
@@ -134,10 +126,34 @@ schema {
       snip: async (root, {
         id
       }) => await Snip.findById(id),
-      snips: async (root) => await Snip.find(),
+      snips: async (root, {
+        query: {
+          name,
+          public,
+          tags,
+          owner,
+          //Content search ignored, as use of it would be prohibitively expensive
+        }
+      }, {
+        _id
+      }) => (await Promise.all((await Snip.find(graphqlToMongoose({
+        public,
+      }))).map(async snip => (await snip.userHasRole({
+        role: "READER",
+        _id
+      }))&&(//Include only the snips that have at least one of the tags specified
+        tags?tags.reduce((last,next)=>last||(snip.tags.includes(next)),false):true
+      )
+        &&(//Assure that owner has the given username
+          owner?(await User.findById(snip.ownerId)).username===owner:true
+        )
+        &&(
+          name?snip.name.includes(name):true
+        )
+        ? snip : null))).filter(i => i),
     },
     Mutation: {
-      newUser: authenticated(false)(async (_, {
+      newUser: (async (_, {
           username,
           password
         }) =>
@@ -145,7 +161,7 @@ schema {
           username,
           password
         })).genToken()),
-      newSnip: authenticated()((_, {
+      newSnip: ((_, {
           name,
           public
         }, {
@@ -156,7 +172,7 @@ schema {
           public,
           _id
         })),
-      setUserRole: authenticated(true)(async (_, {
+      setUserRole: (async (_, {
           snipId,
           username,
           role: roleName
@@ -168,40 +184,47 @@ schema {
           _id: (await User.findOne({
             username
           }))._id,
-          role: roleName
+          role: roleName,
         }))(await Snip.findById(snipId), null, {
           _id
         })
       ),
-      setSnipContent: authenticated(true)(async (_, {
+      updateSnip: (async (_, {
           snipId,
-          newContent
+          query,
         }, {
           _id
         }) =>
-        await role("OWNER")((snip) => snip.setContent({
-          newContent
-        }))(await Snip.findById(snipId), null, {
+        await role("EDITOR")(async (snip) => (await snip.update(graphqlToMongoose({
+          name:query.name,
+          content:query.content,
+          public:query.public,
+          tags:query.tags,
+          //owner excluded because we have setUserRole for that
+        }))))(await Snip.findById(snipId), null, {
           _id
         })
       ),
+      deleteSnip: (async (_, {
+        snipId
+      }, {
+        _id
+      }) => await role("OWNER")(async (snip) => {
+        const owner = await User.findById(snip.ownerId);
+        const startLength=owner.snipIds.length;
+        owner.snipIds = owner.snipIds.filter(id => id+"" !== snipId);
+        console.log("Deleting: Starting length of owner snipIds vs. ending length: "+startLength+" vs. "+owner.snipIds.length);
+        await new Promise((resolve, reject) => owner.save((err, owner) => err || !owner ? reject(err) : resolve(owner)));
+        await (Snip.findByIdAndDelete(snipId));
+        return snipId;
+      })(await Snip.findById(snipId), null, {
+        _id
+      }))
     },
     //Add more resolvers here
-    User: {
-      snips: (root) => Promise.all(root.snipIds.map(async snipId => await Snip.findById(snipId))),
-    },
-    Snip: {
-      name: role("read")((root) => root.name),
-      content: role("read")((root) => root.content),
-      owner: role("read")(async (root) => await User.findById(root.ownerId)),
-      //TODO fix User.findById(... returning null or undefined
-      users: role("read")(async (root) => (await Promise.all(root.roleIds.map(async roleId => await User.findById((await UserRole.findById(roleId)).userId))))),
-    },
-    UserRole: {
-      user: async ({
-        userId
-      }) => (i => console.log(i) || i)(await User.findById(userId)),
-    },
+    User: {},
+    Snip: {},
+    UserRole: {},
   };
 
   const context = function({
@@ -223,6 +246,11 @@ schema {
     typeDefs,
     resolvers,
     context,
+    schemaDirectives: {
+      authenticated: AuthenticatedDirective,
+      role: RoleDirective,
+      idToDoc: IdToDocDirective,
+    },
   });
 
   resolve((app) => server.applyMiddleware({

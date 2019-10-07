@@ -56,7 +56,7 @@
         "parcel-bundler": "^1.12.3",
         "sinon": "^7.4.1"
     },
-    "homepage": "https://sesamestrong.github.io/react-app",
+    "homepage": "https://snippit.ml/",
     "babel": {
         "presets": [
             "nano-react-app"

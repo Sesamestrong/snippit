@@ -7,7 +7,6 @@ module.exports = new Promise((resolve, reject) => {
   const SALT_ROUNDS = 12;
 
   require("dotenv").config();
-  console.log("database",process.env.DATABASE);
   const privateKey = saltshaker();
 
   mongoose.connect(process.env.DATABASE.replace(/<password>/, process.env.PASSWORD), {
@@ -103,6 +102,10 @@ module.exports = new Promise((resolve, reject) => {
       type: Boolean,
       required: true,
     },
+    tags: [{
+      type: String,
+      required: true,
+    }],
   });
 
   snips.statics.create = async function({
@@ -112,14 +115,14 @@ module.exports = new Promise((resolve, reject) => {
   }) {
     const user = await User.findById(_id);
     const snipNames = await Promise.all(user.snipIds.map(async snipId => (await Snip.findById(snipId)).name));
-    console.log(snipNames);
     if (snipNames.includes(name)) throw "The user already has a snip with the name requested.";
     const snip = new Snip({
       name,
       public,
       content: "//Start Snip here",
       ownerId: _id,
-      roleIds: []
+      roleIds: [],
+      tags: [],
     });
     user.snipIds = [...user.snipIds, snip._id];
     return await new Promise((resolve, reject) => snip.save((err, snip) => err ? reject(err) : user.save((err, user) => err || !user ? reject(err) : resolve(snip))));
@@ -148,29 +151,37 @@ module.exports = new Promise((resolve, reject) => {
     role
   }) {
     const roleNum = roleNames.indexOf(role);
-    return this.ownerId == _id || (await Promise.all(
+    return this.ownerId == _id || this.public && role==="READER" || (await Promise.all(
       this.roleIds.map(async roleId => (userRole => userRole.userId == _id && roleNum >= userRole.toNum())(await UserRole.findById(roleId))))).reduce((last, next) => last || next, false);
   };
-  snips.methods.setContent = function({
-    newContent
-  }) {
-    this.content = newContent;
+  snips.methods.update = function(query) {
+    Object.keys(query).forEach(key => {
+      this[key] = query[key]
+    });
     return new Promise((resolve, reject) => this.save((err, snip) => err || !snip ? reject(err) : resolve(snip)));
   };
   snips.methods.setUserRole = async function({
     _id,
-    role
+    role,
   }) {
-    let existentRole = (await Promise.all(this.roleIds.map(async roleId => (role => role.userId == _id && role)(await UserRole.findById(roleId)), undefined))).filter(i => i)[0];
-    if (existentRole)
+    let existentRole = (await Promise.all(this.roleIds.map(async roleId => (role => role.userId + "" == _id && role)(await UserRole.findById(roleId)), undefined))).filter(i => i)[0];
+    if (existentRole) {
+      if (!role) {
+        this.roleIds = this.roleIds.filter(roleId => roleId + "" !== _id);
+        return await Promise.all([
+          (UserRole.findByIdAndDelete(existentRole._id)),
+          (new Promise((resolve, reject) => this.save((err, snip) => err || !snip ? reject(err) : resolve(snip))))
+        ])&&undefined;
+      }
       existentRole.role = role;
-    else
+    } else {
       existentRole = new UserRole({
         userId: _id,
         role
       });
+      this.roleIds = [...this.roleIds, existentRole._id];
+    }
 
-    this.roleIds = [...this.roleIds, existentRole];
     return new Promise((resolve, reject) => existentRole.save((err, userRole) => err || !userRole ? reject(err) : this.save((err, snip) => err || !snip ? reject(err) : resolve(userRole))));
   };
   /*const roleToLevel = {
@@ -193,7 +204,7 @@ module.exports = new Promise((resolve, reject) => {
     console.log("Got past public");
     if(!_id) return false;
     if(_id===this.ownerId+"") return true;
-    console.log("Did not match ownwerId");
+    console.log("Did not match ownerId");
     const authorizationLevel = roleToLevel[role];
     if (!authorizationLevel) throw "Unknown role";
     const isAuthorized = false;

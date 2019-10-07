@@ -3,6 +3,7 @@
     "version": "0.1.0",
     "private": true,
     "dependencies": {
+        "@uiw/react-monacoeditor": "^2.0.1",
         "apollo-server-express": "^2.9.0",
         "bcrypt": "^3.0.6",
         "body-parser": "^1.19.0",
@@ -14,7 +15,9 @@
         "randomstring": "^1.1.5",
         "react": "^16.9.0",
         "react-dom": "^16.9.0",
+        "react-router-dom": "^5.1.2",
         "react-scripts": "3.1.1",
+        "styled-components": "^4.4.0",
         "supertest": "^4.0.2"
     },
     "scripts": {

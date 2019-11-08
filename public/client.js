@@ -20,7 +20,6 @@
 - Create snip pack
 - See all//top
 */
-
 (() => {
 	const $f = d => q => d.querySelector(q);
 	const makeState = obj => {
@@ -75,11 +74,11 @@
 		encode = mapJoin(encodeURIComponent);
 	const css = html;
 
-	const gql = (strs, ...values) => ({
+	const gql = (strs, ...values) => async ({
 		variables,
 		auth = "",
 		select = a => a
-	}) => async () => {
+	}) => {
 		const val = await (await fetch(
 			"https://snippit-backend.herokuapp.com/graphql",
 			{
@@ -109,6 +108,7 @@
 			query SearchSnips($name: String) {
 				snips(query: { name: $name }) {
 					name
+					content
 					owner {
 						username
 					}
@@ -194,6 +194,7 @@
 				parent.style.maxHeight = v[1] + "px";
 			}
 		});
+		state.subscribe("resizing", classSetter(parent, "resizing"));
 
 		close.addEventListener("click", () => {
 			if (!mouseDragged) state.closed = !state.closed;
@@ -212,6 +213,7 @@
 				mouseResizeOffsetX = e.clientX - left - state.size[0];
 			if (state.resize === "top" || state.resize === "both")
 				mouseResizeOffsetY = bottom - e.clientY - state.size[1];
+			state.resizing = (mouseResizeOffsetY || mouseResizeOffsetX) && true;
 		});
 		window.addEventListener(
 			"mousemove",
@@ -256,6 +258,7 @@
 		window.addEventListener(
 			"mouseup",
 			e => {
+				state.resizing = false;
 				mouseOffsetX = null;
 				mouseOffsetY = null;
 				mouseResizeOffsetX = null;
@@ -278,7 +281,9 @@
 			const r =
 				state.currentQuery === ""
 					? null
-					: await queries.searchSnippets(state.currentQuery);
+					: await queries.searchSnippets({
+						variables: { name: state.currentQuery }
+					});
 			if (v === state.currentQuery) {
 				state.currentResults = r;
 				state.loading = false;
@@ -321,14 +326,15 @@
 			currentQuery: v => (noSearch.hidden = v !== ""),
 			loading: v => {
 				loader.hidden = !v;
-				stateSetter(searchButton, "loading")(v);
+				classSetter(searchButton, "loading")(v);
 			},
-			currentResults: v => {
-				noResults.hidden = v === null || v.length > 0;
+			currentResults: (v) => {
+				noResults.hidden = v === null || v.snips.length > 0;
 				resultList.innerHTML = "";
-				if (v !== null) {
+				console.log(v);
+				if (v && v.snips) {
 					resultList.appendChild(
-						v
+						v.snips
 							.map(Result(state, $))
 							.reduce(
 								(a, v) => (a.appendChild(v), a),
@@ -348,25 +354,31 @@
 		const backButton = $("#back-button");
 		const sectionsContainer = $("#sections-container");
 
+		let lastListener = null;
+
 		state.subscribe("currentSnippet", async v => {
-			classSetter(sectionsContainer, "snippet-focused", v !== null);
+			classSetter(sectionsContainer, "snippet-focused", v !== null)(v);
 			if (v !== null) {
 				snippetName.innerText = v.name;
 				snipVersion.innerText = snipMaker.innerText = snippetDescription.innerText =
 					"...Loading";
+
+				const res = (await queries.searchSnippets({
+					variables: { name: v.name }
+				})).snips[0];
+				console.log(res);
 
 				const {
 					desc,
 					version,
 					owner,
 					content
-				} = await queries.searchSnippets({
-					variables: { name: v.name }
-				})[0];
+				} = res
 				snipVersion.innerText = version;
 				snipMaker.innerText = owner.username;
 				snippetDescription.innerText = desc;
-				installSnip.href = `javascript:${content}`;
+				installSnip.removeEventListener("click", lastListener)
+				installSnip.addEventListener("click", lastListener = () => (1,eval)(content))
 			}
 		});
 
@@ -409,7 +421,8 @@
 			auth,
 			currentTab: "search",
 			offLeft: false,
-			resize: "none"
+			resize: "none",
+			resizing: false,
 		});
 		const containerShadow = container.attachShadow({ mode: "open" });
 		containerShadow.innerHTML = html`
@@ -454,7 +467,7 @@
                         <div class="meta-info">
                             <h6 id="snip-maker"></h6>
                             <h6 id="snip-version"></h6>
-                            <a id="install-snip" class="button">Run</a>
+                            <button id="install-snip" class="button">Run</button>
                         </div>
                         <p id="snippet-description"></p>
                         <a href="https://example.com">See on page</a>
@@ -502,6 +515,12 @@
 				box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06),
 					0 2px 4px rgba(0, 0, 0, 0.12);
 				transition: opacity 0.25s ease-in-out,
+					max-width 0.25s ease-in-out, max-height 0.25s ease-in-out,
+					min-width 0.25s ease-in-out, min-height 0.25s ease-in-out,
+					box-shadow 0.25s ease-in-out;
+			}
+			#parent.resizing {
+				transition: opacity 0.25s ease-in-out,
 					box-shadow 0.25s ease-in-out;
 			}
 			#parent.resize-top {
@@ -517,14 +536,10 @@
 					0 2px 4px rgba(0, 0, 0, 0.12), 5px -5px 10px -5px #0074d9;
 			}
 			#parent.closed {
-				max-width: 2.5rem;
-				max-height: 2.5rem;
-				min-width: 2.5rem;
-				min-height: 2.5rem;
-				transition: opacity 0.25s ease-in-out,
-					max-width 0.25s ease-in-out, max-height 0.25s ease-in-out,
-					min-width 0.25s ease-in-out, min-height 0.25s ease-in-out,
-					box-shadow 0.25s ease-in-out;
+				max-width: 2.5rem !important;
+				max-height: 2.5rem !important;
+				min-width: 2.5rem !important;
+				min-height: 2.5rem !important;
 			}
 			#toggle-closed {
 				padding: 0.5em;
@@ -558,6 +573,8 @@
 				padding: 1em;
 				padding-right: 2em;
 				text-align: right;
+				overflow: hidden;
+				border-radius: inherit;
 			}
 			#bottom-bar.reversed {
 				text-align: left;

@@ -24,7 +24,7 @@
         "start": "node backend/index.js",
         "dev": "npm start && npm run app",
         "app": "parcel public/index.html",
-        "build": "parcel build public/index.html",
+        "build": "parcel build public/index.html -d build",
         "test": "NODE_ENV=development mocha --require ./setupDOM.js --require ignore-styles --recursive",
         "eject": "react-scripts eject"
     },

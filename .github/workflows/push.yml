@@ -11,11 +11,11 @@ jobs:
     - name: Checkout
       uses: actions/checkout@master
     - name: Install
-      uses: actions/npm
+      uses: actions/setup-node@v1
       with:
         args: install
     - name: Build
-      uses: actions/npm
+      uses: actions/setup-node@v1
       with:
         args: run build
     - name: Deploy

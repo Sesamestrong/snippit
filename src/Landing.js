@@ -53,27 +53,6 @@ const LandingIllustration = styled.div`
 	perspective: 100px;
 
 	transform-style: preserve-3d;
-
-	div {
-		display: inline-block;
-		background-color: red;
-		margin: 0.25em;
-		height: 1.25em;
-		transition: transform 1s ease-in-out;
-
-		&:hover {
-			transform: translateZ(10px);
-		}
-
-		&.spacer {
-			flex-basis: 100%;
-			height: 0px;
-			background-color: none;
-		}
-
-		&.indent {
-		}
-	}
 `;
 const LandingDescription = styled.p``;
 const LandingPage = styled.div`

@@ -7,7 +7,7 @@ function generateChar() {
 }
 
 const linkList = [
-	{ name: "cd /root", url: "/" },
+	{ name: "cd /home", url: "/" },
 	{ name: "man snippit", url: "/docs" },
 	{ name: "cd /explore", url: "/explore" },
 	{ name: "cd /profile", url: "/profile" },

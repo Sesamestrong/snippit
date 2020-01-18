@@ -10,13 +10,21 @@ const getBlobURL = (code, type) => {
 const CreateContainer = styled.div`
 	display: flex;
 	align-items: stretch;
-	height: 100%;
+	height: calc(100% - 4em);
 `;
 
 const TabBar = styled.div`
 	display: flex;
 	height: 3em;
 	background-color: #111;
+`;
+
+const Container = styled.div`
+	flex-basis: 70%;
+	height: 100%;
+
+	display: flex;
+	flex-direction: column;
 `;
 const Tab = styled.div`
 	height: 3em;
@@ -31,8 +39,7 @@ const Tab = styled.div`
 	}
 `;
 const EditorContainer = styled.div`
-	flex-basis: 70%;
-	height: 100%;
+	flex: 1;
 `;
 const Editor = ({ code, setCode }) => {
 	const tabs = ["javascript", "html", "css"];
@@ -40,7 +47,7 @@ const Editor = ({ code, setCode }) => {
 	console.log(code, currentTab);
 
 	return (
-		<EditorContainer>
+		<Container>
 			<TabBar>
 				{tabs.map(tab => (
 					<Tab
@@ -50,15 +57,17 @@ const Editor = ({ code, setCode }) => {
 					</Tab>
 				))}
 			</TabBar>
-			<MonacoEditor
-				language={currentTab}
-				value={code[currentTab]}
-				onChange={v => setCode(currentTab, v)}
-				options={{
-					automaticLayout: true,
-					theme: "vs-dark"
-				}}></MonacoEditor>
-		</EditorContainer>
+			<EditorContainer>
+				<MonacoEditor
+					language={currentTab}
+					value={code[currentTab]}
+					onChange={v => setCode(currentTab, v)}
+					options={{
+						automaticLayout: true,
+						theme: "vs-dark"
+					}}></MonacoEditor>
+			</EditorContainer>
+		</Container>
 	);
 };
 
@@ -117,9 +126,7 @@ export class Create extends Component {
 		};
 	}
 
-	compile=()=>{
-
-	}
+	compile = () => {};
 
 	setCurrentUrl = currentUrl => {
 		this.setState({ currentUrl });

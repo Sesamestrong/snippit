@@ -7,6 +7,7 @@ export const AugmentedLink = styled.a`
     text-decoration: none;
     transition: background 0.25s ease-in-out;
     padding: 5px;
+    cursor: pointer;
     &:after, &:before{
 		display: inline-block;
         transition: transform 0.25s ease-in-out;
@@ -28,21 +29,4 @@ export const AugmentedLink = styled.a`
             transform: translateX(10%);
         }
     }
-	/* &:after {
-		content: "";
-		display: block;
-		position: absolute;
-		right: -5px;
-		left: -5px;
-		bottom: -5px;
-        top: 105%;
-		transition: top 0.25s ease-in-out;
-		opacity: 0.25;
-		background-color: ${({ theme }) => theme.textColor};
-	}
-	&:hover {
-		:after {
-			top: -5px;
-		}
-	} */
 `;

@@ -4,7 +4,7 @@
     "private": true,
     "dependencies": {
         "@uiw/react-monacoeditor": "^2.0.1",
-        "apollo-server-express": "^2.9.0",
+        "apollo-server-express": "^2.14.2",
         "bcrypt": "^3.0.6",
         "body-parser": "^1.19.0",
         "express": "^4.17.1",
